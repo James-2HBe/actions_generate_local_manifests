@@ -14,9 +14,8 @@ jobs:
     name: Generate Local Manifests by ${{ github.actor }}
     if: github.event.repository.owner.id == github.event.sender.id
     runs-on: ubuntu-22.04
-    env:
-      GITHUB_TOKEN: ${{ secrets.PAT }}
-    permissions: write-all
+    permissions:
+      contents: write
     steps:
     - name: Check Out
       uses: actions/checkout@v4
@@ -28,16 +27,16 @@ jobs:
         && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
         && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
         && sudo apt update \
-        && sudo apt install gh -y  
+        && sudo apt install gh -y
 
     - name: Configure git credentials
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT }}
       run: |
         git config --global user.name "${{ github.actor }}"
         git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
         git config --global credential.helper store
-        echo "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
-      env:
-        GITHUB_TOKEN: ${{ secrets.PAT }}
+        echo "https://x-access-token:$GITHUB_TOKEN@github.com" > ~/.git-credentials
 
     - name: Execute script
       run: |
@@ -54,25 +53,53 @@ jobs:
           echo "TESTING_BRANCH=$(cat branch)" >> "$GITHUB_ENV"
 
     - name: Push to Github as Repository
+      env:
+        TOKEN: ${{ secrets.PAT }}
       run: |
-        cd $filename
-        USERNAME=${{ github.actor }}
-        TOKEN=${{ secrets.PAT }}
-        git init
-        git branch -M $filename
+        cd "$filename"
+        USERNAME="${{ github.actor }}"
+
+        # 前置检查：token 必须存在，否则直接失败并给出清晰原因
+        if [ -z "$TOKEN" ]; then
+          echo "::error::secrets.PAT 为空或未配置，无法认证。请到 Settings > Secrets and variables > Actions 添加名为 PAT 的 secret。"
+          exit 1
+        fi
+
+        git init -b "$filename"
         git add .
         git commit -s -m "$filename: local_manifests: upload template"
-        curl -u "$USERNAME:$TOKEN" https://api.github.com/user/repos -d '{"name":"local_manifests_'$filename'"}' || true
-        git remote add origin https://$USERNAME:$TOKEN@github.com/$USERNAME/local_manifests_$filename.git
-        git push -f origin $filename
+
+        # 创建仓库：Bearer 认证；409/422 表示已存在，属正常情况
+        http_code=$(curl -sS -o /tmp/repo_create.json -w "%{http_code}" \
+          -X POST \
+          -H "Authorization: Bearer $TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/user/repos \
+          -d "{\"name\":\"local_manifests_$filename\",\"private\":false}")
+
+        echo "Repository create API HTTP status: $http_code"
+        cat /tmp/repo_create.json
+
+        case "$http_code" in
+          201) echo "仓库创建成功" ;;
+          422) echo "仓库已存在，继续推送" ;;
+          *)   echo "::error::创建仓库失败（HTTP $http_code），请检查 PAT 是否具备 repo 权限（fine-grained 需 Administration: Read and write）"; exit 1 ;;
+        esac
+
+        # 使用 x-access-token 方案推送（token 不落入 .git/config）
+        git remote remove origin 2>/dev/null || true
+        git remote add origin "https://x-access-token:$TOKEN@github.com/$USERNAME/local_manifests_$filename.git"
+        git push -f origin "$filename"
 
     - name: Run Workflow to Check Manifests
+      env:
+        TOKEN: ${{ secrets.PAT }}
       run: |
        if [ -f "test_status" ]; then
-        USERNAME=${{ github.actor }}
-        TOKEN=${{ secrets.PAT }}
+        USERNAME="${{ github.actor }}"
 
-        bash check.sh --user $USERNAME --token $TOKEN
+        bash check.sh --user "$USERNAME" --token "$TOKEN"
 
         if ! command -v gh &> /dev/null
           then
@@ -82,10 +109,10 @@ jobs:
           echo "gh installed."
         fi
 
-        git clone https://$USERNAME:$TOKEN@github.com/$USERNAME/Manifest_Tester
+        git clone "https://x-access-token:$TOKEN@github.com/$USERNAME/Manifest_Tester"
         cd Manifest_Tester
-        gh repo set-default https://github.com/$USERNAME/Manifest_Tester.git
-        
+        gh repo set-default "https://github.com/$USERNAME/Manifest_Tester.git"
+
         gh workflow run main.yml -f LOCAL_MANIFEST_URL="https://github.com/$USERNAME/local_manifests_$filename" -f LOCAL_MANIFEST_BRANCH="$filename" -f ROM_MANIFEST_URL="$TESTING_URL" -f ROM_MANIFEST_BRANCH="$TESTING_BRANCH" -f CHOICE="LOCAL_MANIFEST"
 
         echo "Testing Started! Please Check https://github.com/$USERNAME/Manifest_Tester/actions"
