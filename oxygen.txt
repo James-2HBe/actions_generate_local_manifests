@@ -1,5 +1,5 @@
-repo init -u https://github.com/LineageOS/android.git -b lineage-22.0 --git-lfs
-git clone https://github.com/James-2HBe/device_xiaomi_ares device/xiaomi/ares -b lineage-22.0
+repo init -u https://github.com/LineageOS/android.git -b lineage-22.2 --git-lfs
+git clone https://github.com/James-2HBe/device_xiaomi_ares device/xiaomi/ares -b lineage-22.2
 git clone https://github.com/James-2HBe/kernel_mt6893 kernel/xiaomi/ares -b chopin_kvm
 git clone https://github.com/James-2HBe/vendor_xiaomi_ares vendor/xiaomi/ares -b lineage-22.2
-git clone https://github.com/James-2HBe/hardware_xiaomi -b lineage-22.0 hardware/mediatek/xiaomi
+git clone https://github.com/James-2HBe/hardware_xiaomi -b lineage-22.2 hardware/mediatek/xiaomi
