@@ -95,6 +95,7 @@ jobs:
     - name: Run Workflow to Check Manifests
       env:
         TOKEN: ${{ secrets.PAT }}
+        GH_TOKEN: ${{ secrets.PAT }}
       run: |
        if [ -f "test_status" ]; then
         USERNAME="${{ github.actor }}"
